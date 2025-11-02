@@ -1,0 +1,38 @@
+f = 20;       %частота
+A = 7;       %амплитуда
+phi = pi/3;     %фаза
+fs = 40;
+
+
+t = linspace(0, 1, 1000); 
+
+
+T = 1;  % длительность сигнала в секундах
+
+f_max = f;  
+Fs = 2 * f_max; 
+
+% Создаем массив временных отсчетов
+N = Fs * T;  % количество отсчетов
+t_dig = 0:1/Fs:duration-1/Fs;  % моменты дискретизации
+
+
+y_dig = 7 * cos(2 * pi * f * t_dig + pi/3);
+
+% Выводим информацию
+fprintf('Количество отсчетов: %d\n', N);
+fprintf('Первые 10 значений массива:\n');
+disp(y_digital(1:10));
+
+% Строим график
+figure;
+stem(t_digital, y_digital, 'filled', 'LineWidth', 1.5);
+hold on;
+plot(t_digital, y_digital, 'r--', 'LineWidth', 0.5);
+xlabel('Время, с');
+ylabel('Амплитуда');
+title('Оцифрованный сигнал (Fs = 40 Гц)');
+legend('Отсчеты', 'Соединяющая линия');
+grid on;
+
+fprintf('\nМассив сохранен в переменной ''y_digital''\n');
