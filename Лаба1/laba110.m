@@ -1,6 +1,7 @@
 clear; clc; close all;
 
 [y1,Fs1] = audioread('Голос.wav');
+y1 = mean(y1, 2);  %среднее двух каналов
 fprintf('Размер y1: %dx%d\n', size(y1));
 
 f = fopen('sample.txt', 'r');
@@ -57,10 +58,14 @@ catch ME
     error('Не получается прочитать данные из sample.txt');
 end
 
-y2 = (left + right)/2;
+y2 = left;
+fprintf('Размер y2 изначально: %dx%d\n', size(y2));
+y2 = real(ifft(y2)); 
 y2 = [y2; y2]; %удваиваем сигнал
+y2 = 2* y2;
+y2 = y2/max(abs(y2));
 
-fprintf('Размер y2: %dx%d\n', size(y2));
+fprintf('Размер y2 после удваивания: %dx%d\n', size(y2));
 
 N = min(length(y1), length(y2));
 
@@ -71,11 +76,9 @@ end
 y1 = y1(1:N);
 y2 = y2(1:N);
 
-y2_time = real(ifft(y2)); 
-y2_time = y2_time/ max(abs(y2_time));
-
 Y1 = fft(y1);
-Y3 = y2 + Y1;
+Y2 = fft(y2);
+Y3 = Y2 + Y1;
 
 y3 = real(ifft(Y3));  %убираем мнимую часть
 y3 = y3 / max(abs(y3));  %нормализация
@@ -84,20 +87,27 @@ fprintf('Размер y3: %dx%d\n', size(y3));
 
 zvuk = audioplayer(y3, Fs1);
 play(zvuk);
-%(y3, Fs1);
-%(y2_time, Fs1);
+
 
 figure;
 
-subplot(2,1,1);
+subplot(3,1,1);
 t = (0:N-1)/Fs1;
 plot(t,y1);
-title('Исходный сигнал');
+title('Исходный 1 сигнал');
 xlabel('Время');
 ylabel('Амплитуда');
 grid on;
 
-subplot(2,1,2);
+subplot(3,1,2);
+t = (0:N-1)/Fs1;
+plot(t,y2);
+title('Исходный 2 сигнал');
+xlabel('Время');
+ylabel('Амплитуда');
+grid on;
+
+subplot(3,1,3);
 plot(t,y3);
 title('Полученный сигнал');
 xlabel('Время');
@@ -117,7 +127,7 @@ grid on;
 
 subplot(3,1,2);
 F = (0:N-1)*Fs1/N;
-P2 = abs(y2)/N;
+P2 = abs(Y2)/N;
 plot(F(1:floor(N/2)), 20*log10(P2(1:floor(N/2))));
 title('Спектр 2 сигнала');
 xlabel('Частота, Гц'); 
