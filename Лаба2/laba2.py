@@ -34,24 +34,67 @@ d = np.linspace(0.01, 10, 5000)  # км
 
 # COST231 Hata
 a = 46.3
-b = 33.9
+bс = 33.9
 hBS = 30
 hMS = 1.5
 a_hUE = (1.1 * np.log10(f / 1e6) - 0.7) * hMS - (1.56 * np.log10(f / 1e6) - 0.8)
 Lclutter = 0
 s = 44.9 - 6.55 * np.log10(hBS)
-PL_COST231 = a + b * np.log10(f / 1e6) - 13.82 * np.log10(hBS) - a_hUE + s * np.log10(d) + Lclutter
+PL_COST231 = a + bс * np.log10(f / 1e6) - 13.82 * np.log10(hBS) - a_hUE + s * np.log10(d) + Lclutter
 
 # UMiNLOS
 PL_UMiNLOS = 26 * np.log10(f / 1e9) + 22.7 + 36.7 * np.log10(d * 1000)
 
 # Walfish–Ikegami
-PL_WI = 42.6 + 26 * np.log10(d) + 20 * np.log10(f / 1e6)
+#прямая видимость у БС
+PL_WI_LOS = 42.6 + 26 * np.log10(d) + 20 * np.log10(f / 1e6)
+#отстуствия прямой видимость БС
+b = 50  #расстояние между зданиями
+phi = 45   #угол
+w = 20  #ширина улицы
+delta_h = 20 - 1.5 #разность между высотой зданий и абонентом
+L0 = 32.44 + 20*np.log10(f/1e6) + 20*np.log10(d)
+
+if hBS > delta_h:
+    L11 = -18 * np.log10(1 + (hBS - delta_h))
+else:
+    L11 = 0
+
+if hBS > delta_h:
+     ka = 54
+elif d > 0.5:
+    ka = 54 - 0.8 * (hBS - delta_h)
+else:
+    ka = 54 - 0.8 * (hBS - delta_h) * (d / 0.5)
+
+if hBS > delta_h:
+    kd = 18
+else:
+     kd = 18 - 15 * ((hBS - delta_h) / delta_h)
+    
+kf = -4 + 0.7 * (f/1e6 / 925 - 1)
+
+L1 = L11 + ka + kd* np.log10(d) + kf*np.log10(f/1e9) - 9*np.log10(b)
+
+if 0 <= phi < 35:
+    L2_term = -10 + 0.354 * phi
+elif 35 <= phi < 55:
+    L2_term = 2.5 + 0.075 * (phi - 35)
+elif 55 <= phi < 90:
+    L2_term = 4.0 - 0.114 * (phi - 55)
+else:
+    L2_term = 4.0
+
+L2 = -16.9 - 10 * np.log10(w) + 10 * np.log10(f/1e9) + 20 * np.log10(delta_h) + L2_term
+
+PL_WI_NLOS = L0 + L1 + L2
+#PL_WI_NLOS = np.where(L1 + L2 > 0, L0 + L1 + L2, L0)
 
 plt.figure(figsize=(9, 6))
 plt.plot(d, PL_COST231, 'r', label='COST231 Hata', linewidth=2)
 plt.plot(d, PL_UMiNLOS, 'b', label='UMi NLOS', linewidth=2)
-plt.plot(d, PL_WI, 'g', label='Walfish–Ikegami', linewidth=2)
+plt.plot(d, PL_WI_NLOS, 'g', label='Walfish–Ikegami без прямой видимости', linewidth=2)
+plt.plot(d, PL_WI_LOS, 'black', label='Walfish–Ikegami прямая видимость', linewidth=2)
 plt.axhline(MAPL_UL, color='r', linestyle='--', linewidth=1.2, label='MAPL UL = ' + str(MAPL_UL) + ' дБ')
 plt.axhline(MAPL_DL, color='b', linestyle='--', linewidth=1.5, label='MAPL DL = ' + str(MAPL_DL) + ' дБ')
 plt.xlabel('Расстояние, км')
