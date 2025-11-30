@@ -1,0 +1,104 @@
+clear, close all
+
+function gold = generate_gold(x, y)
+    N = 31;
+    gold = zeros(1, N);
+    x = x(:)'; % убедимся, что вектор-строка
+    y = y(:)';
+    
+    for i = 1:N
+        gold(i) = xor(x(5), y(5));          % выход = x5 XOR y5
+        
+        new_x1 = xor(x(4), x(5));           % x1 = x4 XOR x5
+        new_y1 = xor(y(2), y(5));           % y1 = y2 XOR y5
+        
+        x = [new_x1, x(1:4)];
+        y = [new_y1, y(1:4)];
+    end
+end
+
+function znach = norm_corr(x, y)
+    sum_x = 0;
+    sum_y = 0;
+    for i = 1:length(x)
+        sum_x = sum_x + x(i)^2; 
+        sum_y = sum_y + y(i)^2;
+    end
+    c = sum(x .* y);
+    znach = c / sqrt(sum_x * sum_y);
+end
+
+function ac = auto_corr_xcorr(seq, max_sdvig)
+    ac = zeros(1, max_sdvig+1);
+    for k = 0:max_sdvig
+        seq_sdvig = circshift(seq, [0, k]);
+        % xcorr(..., 0, 'coeff') = нормированная корреляция при tau=0
+        ac(k+1) = xcorr(seq, seq_sdvig, 0, 'coeff');
+    end
+end
+
+N = 31; % 2^5 - 1
+
+x1 = [1, 0, 0, 1, 1]; %19
+y1 = [1, 1, 0, 1, 0]; %26
+gold1 = generate_gold(x1, y1);
+
+x2 = [1, 0, 1, 0, 0]; %20
+y2 = [1, 0, 1, 0, 1]; %21
+gold2 = generate_gold(x2, y2);
+
+fprintf('Последовательность Голда 1: ');
+fprintf('%d ', gold1);
+fprintf('\nПоследовательность Голда 2: ');
+fprintf('%d ', gold2);
+fprintf('\n\n');
+
+sum1 = sum(gold1.^2);
+sum2 = sum(gold2.^2);
+d = sqrt(sum1 * sum2);
+
+fprintf('Сдвиг:    ');
+for tau = 0:N-1
+    fprintf('%4d  ', tau);
+end
+fprintf('\nКорреляция: ');
+for tau = 0:N-1
+    % Циклический сдвиг gold2 вправо на tau
+    gold2_shifted = circshift(gold2, [0, tau]); % сдвиг вправо
+    c = sum(gold1 .* gold2_shifted);
+    if d > 0
+       R = c / d;
+    else
+       R = 0.0;
+    end
+fprintf('%.3f ', R);
+end
+fprintf('\n\n');
+
+% Автокорреляция первой последовательности
+sum_sq = sum(gold1.^2);
+
+fprintf('Сдвиг');
+for i = 1:N
+    fprintf(' | %d', i);
+end
+fprintf(' | Автокорреляция\n');
+for i = 1:N
+    fprintf('------');
+end
+fprintf('\n');
+
+for tau = 0:N-1
+    gold1_shifted = circshift(gold1, [0, tau]); % сдвиг вправо
+    c = sum(gold1 .* gold1_shifted);
+    if sum_sq > 0
+        R = c / sum_sq;
+    else
+        R = 0.0;
+    end
+    fprintf('%4d', tau);
+    for i = 1:N
+        fprintf(' | %d', gold1_shifted(i));
+    end
+    fprintf(' | %.3f\n', R);
+end
