@@ -1,0 +1,336 @@
+clear, close all
+
+function znach = norm_corr(signal, sync_seq)
+    signal = signal(:);  %преобразуем в столбец
+    sync_seq = sync_seq(:);
+    
+    L = length(sync_seq);
+    corr = zeros(length(signal),1);
+    
+    for k = 1:length(signal)-L
+        x = signal(k:k+L-1);
+        corr(k) = sum(x .* sync_seq) / (sqrt(sum(x.^2) * sum(sync_seq.^2)));
+    end
+    znach = corr;
+end
+
+function gold = generate_gold(x, y, length)
+    gold = zeros(1, length);
+    x = x(:)';  %вектор-строка
+    y = y(:)';
+    
+    for i = 1:length
+        gold(i) = xor(x(5), y(5));          % выход = x5 XOR y5
+        
+        new_x1 = xor(x(4), x(5));           % x1 = x4 XOR x5
+        new_y1 = xor(y(2), y(5));           % y1 = y2 XOR y5
+        
+        x = [new_x1, x(1:4)];
+        y = [new_y1, y(1:4)];
+    end
+end
+
+%%              Ввод данных 
+
+name = input('Введите имя и фамилию: ', 's');
+
+N = 10;
+M = 7;
+G_l = 31;  % 2^5 - 1
+
+%%              ASCII-кодирование
+
+ascii = double(name);
+l = length(ascii)*8;  %код 1 символа = 8 бит
+
+bits = [];
+for i = 1:length(ascii)
+    b = dec2bin(ascii(i), 8) - '0';
+    bits = [bits b];
+end
+
+fprintf('Битовая последовательность: ');
+fprintf('%d', bits);
+fprintf('\n');
+
+figure;
+stairs(bits);
+ylim([-0.2 1.2]);
+title(['Битовая последовательность для "', name, '"']);
+xlabel('Номер бита');
+ylabel('Значение');
+grid on;
+
+%%                     CRC
+
+crc_l = M;
+G = [1 1 0 0 0 0 1 1];       %x^7 + x^6 + x + 1
+
+crc_data = [bits zeros(1,crc_l)];
+temp = crc_data;
+
+for i = 1:length(bits)
+    if temp(i) == 1
+        %проверяем что не выходим за границы
+        if i <= length(temp) - crc_l
+            %побитовое XOR с полиномом
+            temp(i:i+crc_l) = xor(temp(i:i+crc_l), G);
+        end
+    end
+end
+
+%остаток от деления
+crc = temp(end - crc_l+1:end);
+
+fprintf('CRC: ');
+fprintf('%d', crc);
+fprintf('\n');
+
+bits_crc = [bits crc];
+
+%%              Последовательность Голда
+
+B = 5; 
+
+x = dec2bin(N, B)- '0'; 
+y = dec2bin(N + 7, B)- '0'; 
+
+gold = generate_gold(x, y, G_l);
+
+tx_bits = [gold bits_crc];
+
+figure;
+stairs(tx_bits);
+title('Данные + CRC + Голд');
+ylim([-0.2 1.2]);
+xlabel('Номер бита');
+ylabel('Значение');
+
+%%                   Временные отчеты
+
+N = 10;   %количество отчетов на бит
+signal = repelem(tx_bits, N);
+
+figure;
+plot(signal);
+title('Временные отчеты сигнала');
+ylim([-0.2 1.2]);
+xlabel('Номер отчета');
+ylabel('Значение');
+
+%%           Вставка сигнала в нулевой массив 
+
+signal_l = length(signal);
+new_signal = zeros(1, 2*signal_l);
+
+while true
+    shift = input(['Введите размер сдвига (0-', num2str(signal_l), '): ']);
+    
+    if shift < 0
+        fprintf('Сдвиг не может быть отрицательным\n');
+    elseif shift + signal_l > length(new_signal)
+        fprintf('Слишком большой сдвиг. Максимум: %d\n', length(new_signal) - signal_l);
+    else
+        break;  %ввод корректен
+    end
+end
+
+new_signal(shift+1:shift+signal_l) = signal;
+
+figure;
+plot(new_signal);
+title('Переданный сигнал с задержкой');
+ylim([-0.2 1.2]);
+xlabel('Номер отсчета');
+ylabel('Значение');
+
+%%                  Добавление шума 
+
+sigma = input('Введите сигму: ');
+mu = 0;
+noise = mu + sigma * randn(1, length(new_signal));
+
+rx = new_signal + noise;
+
+figure;
+plot(rx);
+title('Принятый сигнал + шум');
+xlabel('Номер отсчета');
+ylabel('Значение');
+
+%%                Корреляционный прием
+
+gold_samples = repelem(gold, N);
+corr = norm_corr(rx, gold_samples);
+
+figure;
+plot(corr);
+xlabel('Номер отсчета');
+ylabel('Значение корреляции');
+title('Корреляционная функция');
+grid on;
+
+%возвращет значение и индекс
+[~, start_sample] = max(corr);
+
+fprintf('Синхронизация начинается с отсчета: %d\n', start_sample);
+
+% Проверка корректности позиции
+if start_sample < 1 || start_sample + length(signal) > length(rx)
+    error('Некорректная позиция синхронизации');
+end
+
+rx_sync = rx(start_sample : start_sample + length(signal) - 1);
+
+%%                Принятие решений по отчетам
+
+P = 0.5;     % порог
+num_bits = floor(length(rx_sync)/N);
+rx_bits = zeros(1, num_bits);
+
+for i = 1:num_bits
+    segment = rx_sync((i-1)*N + 1 : i*N);
+    rx_bits(i) = mean(segment) > P;
+end
+
+fprintf('Принято бит (с синхрой): %d\n', length(rx_bits));
+
+%%                Удаление синхросигнала
+
+rx_bits = rx_bits(G_l + 1 : end);
+
+fprintf('Бит после удаления синхры: %d\n', length(rx_bits));
+
+figure;
+stairs(rx_bits);
+ylim([-0.2 1.2]);
+xlabel('Номер бита');
+ylabel('Значение');
+title('Принятые биты после удаления синхросигнала');
+grid on;
+
+%%                    Проверка CRC
+
+temp = [rx_bits zeros(1, crc_l)];
+
+for i = 1:length(rx_bits)-crc_l
+    if temp(i) == 1
+        temp(i:i+crc_l) = xor(temp(i:i+crc_l), G);
+    end
+end
+
+crc_check = temp(end - crc_l+1:end);
+
+if sum(crc_check) == 0
+    disp('CRC correct');
+else
+    disp('CRC error');
+end
+
+%%                 ASCII-декодирование
+
+if sum(crc_check) == 0
+    data_bits = rx_bits(1:end-crc_l);
+    
+    fprintf('Длина принятых данных: %d бит\n', length(data_bits));
+    fprintf('Ожидаемая длина: %d бит\n', length(bits));
+    
+    if mod(length(data_bits), 8) ~= 0
+        error('Количество битов не кратно 8');
+    end
+    
+    fprintf('Первые 32 бита принятых данных:\n');
+    fprintf('%d', data_bits(1:min(32, end)));
+    fprintf('\nПервые 32 бита исходных данных:\n');
+    fprintf('%d', bits(1:min(32, end)));
+    fprintf('\n');
+    
+    if length(data_bits) == length(bits)
+        bit_errors = sum(data_bits ~= bits);
+        fprintf('Количество битовых ошибок: %d\n', bit_errors);
+    end
+    
+    %декодирование бит в ascii
+    chars = reshape(data_bits, 8, [])';
+    decoded = char(bin2dec(num2str(chars)))';
+    
+    fprintf('Декодированный текст:\n%s\n', decoded);
+
+    if strcmp(decoded, name)
+        fprintf('Декодирование успешно\n');
+    else
+        fprintf('Ошибка декодирования\n');
+        
+        figure;
+        subplot(2,1,1);
+        %берем первые 50 элементов но не больше чем в массиве
+        stem(bits(1:min(50, end)), 'b', 'filled');
+        title('Оригинальные биты');
+        ylim([-0.2 1.2]);
+        grid on;
+        
+        subplot(2,1,2);
+        stem(data_bits(1:min(50, end)), 'r', 'filled');
+        title('Принятые биты');
+        ylim([-0.2 1.2]);
+        grid on;
+    end
+else
+    disp('Декодирование невозможно из-за ошибки CRC');
+end
+
+%%                 Спектры сигналов
+
+Fs = 1000;
+
+%переводим в частотную область и берем амплитуду
+S_tx = abs(fft(signal));
+S_rx = abs(fft(rx));
+
+f_tx = linspace(-Fs/2, Fs/2, length(S_tx));
+%f_tx = linspace(0, Fs, length(S_tx));
+%f_rx = linspace(0, Fs, length(S_rx));
+
+figure;
+subplot(2,1,1);
+plot(f_tx, S_tx / max(S_tx), 'b'); 
+grid on;
+xlabel('Частота');
+ylabel('Амплитуда');
+title('Спектр передаваемого сигнала');
+ylim([0 0.2]);
+
+subplot(2,1,2);
+plot(f_rx, S_rx / max(S_rx), 'r');
+grid on;
+xlabel('Частота');
+ylabel('Амплитуда');
+title('Спектр принятого сигнала');
+ylim([0 0.2]);
+
+%% Спектры при разной длительности символа
+
+N_short = N / 2;
+N_long  = 2 * N;
+
+signal_short = repelem(tx_bits, N_short);
+signal_long  = repelem(tx_bits, N_long);
+
+S_short = abs(fft(signal_short));
+S_mid   = abs(fft(signal));
+S_long  = abs(fft(signal_long));
+
+f_short = linspace(0, Fs, length(S_short));
+f_mid   = linspace(0, Fs, length(S_mid));
+f_long  = linspace(0, Fs, length(S_long));
+
+figure;
+plot(f_short, S_short / max(S_short), 'r'); hold on;
+plot(f_mid, S_mid / max(S_mid), 'g');
+plot(f_long,S_long / max(S_long), 'b');
+grid on;
+xlabel('Частота');
+ylabel('Амплитуда');
+ylim([0 0.2]);
+title('Влияние длительности символа на спектр сигнала');
+legend('Короткий символ (N/2)', 'Средний символ (N)', 'Длинный символ (2N)');
