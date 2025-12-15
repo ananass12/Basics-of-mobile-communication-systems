@@ -35,17 +35,18 @@ end
 name = input('Введите имя и фамилию: ', 's');
 
 N = 10;
+L = 8;
 M = 7;
 G_l = 31;  % 2^5 - 1
 
 %%              ASCII-кодирование
 
 ascii = double(name);
-l = length(ascii)*8;  %код 1 символа = 8 бит
+l = length(ascii)*L;  %код 1 символа = 8 бит
 
 bits = [];
 for i = 1:length(ascii)
-    b = dec2bin(ascii(i), 8) - '0';
+    b = dec2bin(ascii(i), L) - '0';
     bits = [bits b];
 end
 
@@ -147,6 +148,7 @@ ylabel('Значение');
 %%                  Добавление шума 
 
 sigma = input('Введите сигму: ');
+
 mu = 0;
 noise = mu + sigma * randn(1, length(new_signal));
 
@@ -229,6 +231,119 @@ else
     fprintf('CRC error\n');
 end
 
+
+%%                  Дополнительное задание
+
+%по оси х сигма, по оси у вероятность ошибки по срс
+%сравнение реального количество ошибок BER от сигмы для количсетва семплов(разные кривые для количества 2, 10, 100)
+
+sigmas = 0.1:0.1:1.2;
+Samples = [2 10 100];
+nums = 100;
+
+crc_errors_val = zeros(length(Samples), length(sigmas));
+ber_val = zeros(length(Samples), length(sigmas));
+
+tx_bits_full = tx_bits;  %[Gold + bits + CRC]
+
+for idx = 1:length(Samples)
+    N = Samples(idx);
+    fprintf('Обработка N = %d\n', N);
+
+    for ydx = 1:length(sigmas)
+        sigma = sigmas(ydx);
+        crc_er = 0;
+        bit_er = 0;
+        total_bits = 0;
+
+        for zdx = 1:nums
+            signal = repelem(tx_bits_full, N);
+            signal_l = length(signal);
+
+            max_shift = signal_l; 
+            shift = randi([0, max_shift]);  %случайный сдвиг
+            new_signal = zeros(1, 2*signal_l);
+            new_signal(shift+1 : shift+signal_l) = signal;
+
+            noise = sigma * randn(size(new_signal));
+            rx = new_signal + noise;
+
+            gold_samples = repelem(gold, N);
+            corr = norm_corr(rx, gold_samples);
+            [~, start_sample] = max(corr);
+
+            %проверка корректности позиции синхронизации
+            if start_sample < 1 || start_sample + signal_l > length(rx)
+                crc_er = crc_er + 1;
+                bit_er = bit_er + length(bits);  
+                total_bits = total_bits + length(bits);
+                continue;
+            end
+
+            %убираем лишнее до начала сигнала
+            rx_sync = rx(start_sample : start_sample + signal_l - 1);
+
+            %демрдуляция
+            num_bits_total = length(tx_bits_full);
+            rx_bits_total = zeros(1, num_bits_total);
+            for i = 1:num_bits_total
+                segment = rx_sync((i-1)*N + 1 : i*N);
+                rx_bits_total(i) = mean(segment) > P;
+            end
+
+            %убираем голда
+            rx_bits = rx_bits_total(G_l + 1 : end);
+
+            %вычисление BER
+            if length(rx_bits) >= length(bits) + crc_l
+                %извлекаем только данные
+                data_rx = rx_bits(1:length(bits));
+                %сравниваем принятые данные с исходными, считаем ошибки
+                bit_er = bit_er + sum(data_rx ~= bits);
+                %счетчик кол-ва ошибок
+                total_bits = total_bits + length(bits);
+            else    %если принято недостаточно битов - все ошибочные
+                bit_er = bit_er + length(bits);
+                total_bits = total_bits + length(bits);
+            end
+
+            %проверка CRC
+            temp = [rx_bits zeros(1, crc_l)];
+            for i = 1:length(rx_bits) - crc_l
+                if temp(i) == 1
+                    temp(i:i+crc_l) = xor(temp(i:i+crc_l), G);
+                end
+            end
+            crc_check = temp(end - crc_l + 1 : end);
+            if sum(crc_check) ~= 0
+                crc_er = crc_er + 1;
+            end
+        end
+
+        %вероятность ошибки CRC = количество ошибок / общее количество испытаний
+        crc_errors_val(idx, ydx) = crc_er / nums;
+        %BER = количество ошибочных битов / общее количество переданных битов
+        ber_val(idx, ydx) = bit_er / total_bits;
+    end
+end
+
+figure;
+subplot(2,1,1);
+plot(sigmas, crc_errors_val');
+xlabel('Сигма');
+ylabel('Вероятность ошибки CRC');
+legend('N=2', 'N=10', 'N=100');
+grid on;
+title('Зависимость вероятности ошибки CRC от уровня шума');
+
+subplot(2,1,2);
+plot(sigmas, ber_val'); 
+xlabel('Сигма');
+ylabel('BER');
+legend('N=2', 'N=10', 'N=100');
+grid on;
+title('Зависимость BER от уровня шума для разных N');
+
 %%                 ASCII-декодирование
 
 if sum(crc_check) == 0
@@ -237,7 +352,7 @@ if sum(crc_check) == 0
     fprintf('Длина принятых данных: %d бит\n', length(data_bits));
     fprintf('Ожидаемая длина: %d бит\n', length(bits));
     
-    if mod(length(data_bits), 8) ~= 0
+    if mod(length(data_bits), L) ~= 0
         error('Количество битов не кратно 8');
     end
     
@@ -253,7 +368,9 @@ if sum(crc_check) == 0
     end
     
     %декодирование бит в ascii
-    chars = reshape(data_bits, 8, [])';
+    %получаем матрицу 8 строк N столбцов, транспонируем ее
+    chars = reshape(data_bits, L, [])';
+    %преобразуем в строку - строку в двоичное чисоо - число в символ
     decoded = char(bin2dec(num2str(chars)))';
     
     fprintf('Декодированный текст:\n%s\n', decoded);
